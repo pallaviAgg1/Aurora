@@ -1,0 +1,179 @@
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
+import NfcManager, { NfcTech, Ndef } from 'react-native-nfc-manager';
+
+export default function SetAlarmScreen() {
+  const [alarms, setAlarms] = useState<{ time: string; days: string[] }[]>([]);
+  const router = useRouter();
+
+  useEffect(() => {
+    const loadAlarms = async () => {
+      try {
+        const savedAlarms = await AsyncStorage.getItem('alarms');
+        if (savedAlarms) {
+          setAlarms(JSON.parse(savedAlarms));
+        }
+      } catch (error) {
+        console.error('Failed to load alarms:', error);
+      }
+    };
+
+    loadAlarms();
+  }, []);
+
+  const deleteAlarm = async (index: number) => {
+    try {
+      const updatedAlarms = alarms.filter((_, i) => i !== index);
+      setAlarms(updatedAlarms);
+      await AsyncStorage.setItem('alarms', JSON.stringify(updatedAlarms));
+      Alert.alert('Alarm Deleted', 'The alarm has been successfully deleted.');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to delete the alarm. Please try again.');
+    }
+  };
+
+  // Read and save NFC tag data
+  const setupNfcTag = async () => {
+    try {
+      await NfcManager.start();
+      await NfcManager.requestTechnology(NfcTech.Ndef, { alertMessage: 'Hold your phone near the NFC tag' });
+      const tag: any = await NfcManager.getTag();
+      if (!tag) {
+        Alert.alert('Error', 'No NFC tag found');
+        return;
+      }
+      const ndefMessage = tag.ndefMessage ?? [];
+      if (ndefMessage.length === 0) {
+        Alert.alert('Error', 'No NDEF records found on the tag');
+        return;
+      }
+      const record = ndefMessage[0];
+      const rawPayload = record.payload;
+      const bytes = rawPayload instanceof Uint8Array ? rawPayload : new Uint8Array(rawPayload);
+      const payload = Ndef.text.decodePayload(bytes);
+      await AsyncStorage.setItem('validNfcTagId', payload);
+      Alert.alert('NFC Tag Saved', `Tag data: ${payload}`);
+    } catch (error) {
+      console.warn('NFC read error', error);
+      Alert.alert('Error', 'Failed to read NFC tag');
+    } finally {
+      NfcManager.cancelTechnologyRequest();
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <Text style={styles.title}>Your Alarms</Text>
+
+      {alarms.length === 0 ? (
+        <Text style={styles.noAlarmsText}>No alarms set. Add a new alarm!</Text>
+      ) : (
+        <FlatList
+          data={alarms}
+          keyExtractor={(_, index) => index.toString()}
+          renderItem={({ item, index }) => (
+            <View style={styles.alarmItem}>
+              <Text style={styles.alarmTime}>{item.time}</Text>
+              <Text style={styles.alarmDays}>{item.days.join(', ')}</Text>
+              <TouchableOpacity
+                style={styles.deleteButton}
+                onPress={() => deleteAlarm(index)}
+              >
+                <Text style={styles.deleteButtonText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        />
+      )}
+
+      <TouchableOpacity
+        style={styles.addButton}
+        onPress={() => router.push('/configure-alarm')}
+      >
+        <Text style={styles.addButtonText}>Add New Alarm</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.setupButton}
+        onPress={setupNfcTag}
+      >
+        <Text style={styles.setupButtonText}>Set Up NFC Tag</Text>
+      </TouchableOpacity>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#002a44',
+    padding: 20,
+  },
+  title: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 28,
+    color: '#ede5cf',
+    marginBottom: 24,
+  },
+  noAlarmsText: {
+    fontFamily: 'Inter-Regular',
+    fontSize: 16,
+    color: '#9ca7c0',
+    textAlign: 'center',
+    marginTop: 20,
+  },
+  alarmItem: {
+    backgroundColor: '#f3f2f5',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  alarmTime: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 24,
+    color: '#6b5aa0',
+  },
+  alarmDays: {
+    fontFamily: 'Inter-Regular',
+    fontSize: 16,
+    color: '#9ca7c0',
+  },
+  deleteButton: {
+    backgroundColor: '#FF3B30',
+    borderRadius: 8,
+    padding: 8,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  deleteButtonText: {
+    fontFamily: 'Inter-SemiBold',
+    fontSize: 14,
+    color: 'white',
+  },
+  addButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 'auto',
+  },
+  addButtonText: {
+    fontFamily: 'Inter-SemiBold',
+    fontSize: 18,
+    color: '#ede5cf',
+  },
+  setupButton: {
+    backgroundColor: '#6b5aa0',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  setupButtonText: {
+    fontFamily: 'Inter-SemiBold',
+    fontSize: 18,
+    color: '#ede5cf',
+  },
+});
